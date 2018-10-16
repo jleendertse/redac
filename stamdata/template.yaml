@@ -1,0 +1,975 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: "AWS::Serverless-2016-10-31"
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+  StageNamePrd:
+    Type: String
+    Default: prd
+  InfraStackName:
+    Type: String
+    Default: redac-infra
+  VersionAlias:
+    Type: String
+    Default: Active
+
+Resources:
+
+  GetBetrokkeneByIdLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: stamdata.zip     # required
+      Handler: GetBetrokkene.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaDynamoRORoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+
+  UpdateBetrokkeneLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: stamdata.zip     # required
+      Handler: UpdateBetrokkene.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaDynamoRWRoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+
+  DeleteBetrokkeneByIdLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: stamdata.zip     # required
+      Handler: DeleteBetrokkene.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaDynamoRWRoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+
+  GetSpecificatieByIdLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: stamdata.zip     # required
+      Handler: GetSpecificatie.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaDynamoRWRoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+
+  UpdateSpecificatieLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: stamdata.zip     # required
+      Handler: UpdateSpecificatie.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaDynamoRWRoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+
+  DeleteSpecificatieByIdLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: stamdata.zip     # required
+      Handler: DeleteSpecificatie.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaDynamoRWRoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+
+  ApiGateway:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Body:
+        swagger: "2.0"
+        info:
+          version: "1.0.0"
+          title: !Sub "${AWS::StackName}-api"
+          description: REST webservice voor de beheer van stamdata
+        security:
+          - api_key: []
+        x-amazon-apigateway-request-validators:
+          all:
+            validateRequestBody: true
+            validateRequestParameters: true
+        x-amazon-apigateway-request-validator: all
+        paths:
+          /rest/api/v1/redac/betrokkene/{Tabel}/{Id}:
+          # PUT
+            put:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Update van een betrokkene
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de betrokkene
+                  # enum: [vertaler, fotograaf, illustrator, redacteur, voorlezer, auteur]
+                - in: path
+                  name: Id
+                  required: true
+                  type: number
+                  description: id van de betrokkene
+                - in: body
+                  name: BetrokkeneUpdate
+                  required: true
+                  schema:
+                    $ref: '#/definitions/BetrokkeneUpdate'
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt UpdateBetrokkeneLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      #set ($root=$input.path('$'))
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$input.params('Id')",
+                      "Voornaam": "$root.Voornaam",
+                      "Voorletters": "$root.Voorletters",
+                      "Voorvoegsels": "$root.Voorvoegsels",
+                      "Achternaam": "$root.Achternaam",
+                      "UitgVoornaam": "$root.UitgVoornaam"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+          # GET
+            get:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Haal een betrokkene op
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de betrokkene
+                  # enum: [vertaler, fotograaf, illustrator, redacteur, voorlezer, auteur]
+                - in: path
+                  name: Id
+                  required: true
+                  type: number
+                  description: id van de betrokkene
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt GetBetrokkeneByIdLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$input.params('Id')"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+          # DELETE
+            delete:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Verwijder een betrokkene
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de betrokkene
+                  # enum: [vertaler, fotograaf, illustrator, redacteur, voorlezer, auteur]
+                - in: path
+                  name: Id
+                  required: true
+                  type: number
+                  description: id van de betrokkene
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt DeleteBetrokkeneByIdLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$input.params('Id')"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+          /rest/api/v1/redac/betrokkene/{Tabel}:
+          # POST
+            post:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Insert van een betrokkene
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de betrokkene
+                  # enum: [vertaler, fotograaf, illustrator, redacteur, voorlezer, auteur]
+                - in: body
+                  name: BetrokkeneCreate
+                  required: true
+                  schema:
+                    $ref: '#/definitions/BetrokkeneCreate'
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt UpdateBetrokkeneLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      #set ($root=$input.path('$'))
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$root.Id",
+                      "Voornaam": "$root.Voornaam",
+                      "Voorletters": "$root.Voorletters",
+                      "Voorvoegsels": "$root.Voorvoegsels",
+                      "Achternaam": "$root.Achternaam",
+                      "UitgVoornaam": "$root.UitgVoornaam"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+          /rest/api/v1/redac/specificatie/{Tabel}/{Id}:
+          # PUT
+            put:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Update van een specificatie
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de specificatie
+                  enum: [editieType, feature, voorvoegsel]
+                - in: path
+                  name: Id
+                  required: true
+                  type: number
+                  description: id van de specificatie
+                - in: body
+                  name: SpecificatieUpdate
+                  required: true
+                  schema:
+                    $ref: '#/definitions/SpecificatieUpdate'
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt UpdateSpecificatieLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      #set ($root=$input.path('$'))
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$input.params('Id')",
+                      "Omschrijving": "$root.Omschrijving"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+          # GET
+            get:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Haal een specificatie op
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de specificatie
+                  # enum: [editieType, feature, voorvoegsel]
+                - in: path
+                  name: Id
+                  required: true
+                  type: number
+                  description: id van de specificatie
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt GetSpecificatieByIdLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$input.params('Id')"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+          # DELETE
+            delete:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Verwijder een specificatie
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de specificatie
+                  # enum: [editieType, feature, voorvoegsel]
+                - in: path
+                  name: Id
+                  required: true
+                  type: number
+                  description: id van de specificatie
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt DeleteSpecificatieByIdLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$input.params('Id')"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+          /rest/api/v1/redac/specificatie/{Tabel}:
+          # POST
+            post:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Insert van een specificatie
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: Tabel
+                  required: true
+                  type: "string"
+                  description: resourcenaam van de specificatie
+                  # enum: [editieType, feature, voorvoegsel]
+                - in: body
+                  name: SpecificatieCreate
+                  required: true
+                  schema:
+                    $ref: '#/definitions/SpecificatieCreate'
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt UpdateSpecificatieLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      #set ($root=$input.path('$'))
+                      "Tabel": "$input.params('Tabel')",
+                      "Id": "$root.Id",
+                      "Omschrijving": "$root.Omschrijving"
+                    }
+                credentials: !GetAtt ApiRoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              security:
+                - api_key: []
+        securityDefinitions:
+          api_key:
+            type: "apiKey"
+            name: "x-api-key"
+            in: "header"
+        definitions:
+          Resource:
+            type: "string"
+            description: resourcenaam van de stamdata
+          Id:
+            type: "integer"
+            description: id van stamdata
+          Voornaam:
+            type: "string"
+            description: voornaam van de betrokkene
+          Voorletters:
+            type: "string"
+            description: voorletters van de betrokkene
+          Voorvoegsels:
+            type: "string"
+            description: voorvoegsels van de betrokkene
+          Achternaam:
+            type: "string"
+            description: achternaam  van de betrokkene
+          UitgeverVoornaam:
+            type: "string"
+            description: voornaam van de betrokkene zoals de uitgever deze getoond wil hebben
+          BetrokkeneUpdate:
+            type: "object"
+            properties:
+              Voornaam:
+                $ref: "#/definitions/Voornaam"
+              Voorletters:
+                $ref: "#/definitions/Voorletters"
+              Voorvoegsels:
+                $ref: "#/definitions/Voorvoegsels"
+              Achternaam:
+                $ref: "#/definitions/Achternaam"
+              UitgeverVoornaam:
+                $ref: "#/definitions/UitgeverVoornaam"
+            required:
+              - Achternaam
+          BetrokkeneCreate:
+            type: "object"
+            properties:
+              Id:
+                $ref: "#/definitions/Id"
+              Voornaam:
+                $ref: "#/definitions/Voornaam"
+              Voorletters:
+                $ref: "#/definitions/Voorletters"
+              Voorvoegsels:
+                $ref: "#/definitions/Voorvoegsels"
+              Achternaam:
+                $ref: "#/definitions/Achternaam"
+              UitgeverVoornaam:
+                $ref: "#/definitions/UitgeverVoornaam"
+            required:
+              - Id
+              - Achternaam
+          BetrokkenById:
+            type: "object"
+            properties:
+              Id:
+                $ref: "#/definitions/Id"
+            required:
+              - Id
+          Id:
+            type: "integer"
+            description: id van stamdata
+          Omschrijving:
+            type: "string"
+            description: omschrijving van de specificatie
+          SpecificatieUpdate:
+            type: "object"
+            properties:
+              Omschrijving:
+                $ref: "#/definitions/Omschrijving"
+            required:
+              - Omschrijving
+          SpecificatieCreate:
+            type: "object"
+            properties:
+              Id:
+                $ref: "#/definitions/Id"
+              Omschrijving:
+                $ref: "#/definitions/Omschrijving"
+            required:
+              - Id
+              - Omschrijving
+          SpecificatieById:
+            type: "object"
+            properties:
+              Id:
+                $ref: "#/definitions/Id"
+            required:
+              - Id
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiGatewayDeployment
+      RestApiId: !Ref ApiGateway
+      StageName: !Ref StageName
+
+  ApiRoleApiGatewayToLambda:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "apigateway.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-api-lambda-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: "lambda:*"
+                Effect: "Allow"
+                Resource:
+                  - !Join
+                    - ''
+                    - - !GetAtt GetBetrokkeneByIdLambda.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt UpdateBetrokkeneLambda.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt DeleteBetrokkeneByIdLambda.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt GetSpecificatieByIdLambda.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt UpdateSpecificatieLambda.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt DeleteSpecificatieByIdLambda.Arn
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiGateway
+    Properties:
+      RestApiId: !Ref ApiGateway
+
+  ApiKey:
+    Type: "AWS::ApiGateway::ApiKey"
+    DependsOn:
+      - ApiGatewayDeployment
+      - ApiGatewayStage
+    Properties:
+      Description: "API key voor beheer van stamdata"
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref ApiGateway
+          StageName: !Ref StageName
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - "ApiGateway"
+      - "ApiKey"
+    Properties:
+      ApiStages:
+      - ApiId: !Ref ApiGateway
+        Stage: !Ref StageName
+      Description: Redactionele controle beheer van stamdata API standaard Usage plan
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    DependsOn:
+      - "ApiGateway"
+      - "ApiKey"
+      - "UsagePlan"
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan

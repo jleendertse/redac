@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: "AWS::Serverless-2016-10-31"
+Parameters:
+  InfraStackName:
+    Type: String
+    Default: redac-infra
+
+# instellingen van de capacity per tabel
+# ReadCapacityUnits: Provisioned capacity read units
+# WriteCapacityUnits: Provisioned capacity write units
+# ReadAutoscaling: als 1, zet autoscaling aan voor read
+# ReadAutoscalingMin: Minimum read provisioned capacity bij autoscaling
+# ReadAutoscalingMax: Maximum read provisioned capacity bij autoscaling
+# WriteAutoscaling: als 1, zet autoscaling aan voor write
+# WriteAutoscalingMin: Minimum write provisioned capacity bij autoscaling
+# WriteAutoscalingMax: Maximum write provisioned capacity bij autoscaling
+
+Mappings:
+  CapacityMap:
+    RekognitionResultaat:
+      ReadCapacityUnits:  3
+      WriteCapacityUnits: 5
+      ReadAutoscaling: 0
+      ReadAutoscalingMin: 0
+      ReadAutoscalingMax: 0
+      WriteAutoscaling: 1
+      WriteAutoscalingMin: 5
+      WriteAutoscalingMax: 40000
+    Voorstel:
+      ReadCapacityUnits:  3
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 0
+      ReadAutoscalingMin: 0
+      ReadAutoscalingMax: 0
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Foutmelding:
+      ReadCapacityUnits:  3
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 0
+      ReadAutoscalingMin: 0
+      ReadAutoscalingMax: 0
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+
+Resources:
+
+  RekognitionResultaatDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:                # required, list of AttributeDefinition
+        -
+          AttributeName: "Isbn"
+          AttributeType: "N"
+        -
+          AttributeName: "Bronkode"
+          AttributeType: "N"
+      KeySchema:                # required, list of KeySchema
+        -
+          AttributeName: "Isbn"
+          KeyType: "HASH"
+        -
+          AttributeName: "Bronkode"
+          KeyType: "RANGE"
+      ProvisionedThroughput:      # required
+        ReadCapacityUnits: !FindInMap [ CapacityMap, "RekognitionResultaat", ReadCapacityUnits ]
+        WriteCapacityUnits: !FindInMap [ CapacityMap, "RekognitionResultaat", WriteCapacityUnits ]
+      StreamSpecification:     # optional
+        StreamViewType: NEW_IMAGE
+      TableName:      # optional
+        RekognitionResultaat
+      TimeToLiveSpecification:
+        AttributeName: "DeleteDateTTL"
+        Enabled: true
+      Tags:
+      - Key: Name
+        Value: !Join
+          - '-'
+          - - RekognitionResultaat
+            - !Ref AWS::StackName
+
+  VoorstelDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:                # required, list of AttributeDefinition
+        -
+          AttributeName: "Isbn"
+          AttributeType: "N"
+      KeySchema:                # required, list of KeySchema
+        -
+          AttributeName: "Isbn"
+          KeyType: "HASH"
+      ProvisionedThroughput:      # required
+        ReadCapacityUnits: !FindInMap [ CapacityMap, "Voorstel", ReadCapacityUnits ]
+        WriteCapacityUnits: !FindInMap [ CapacityMap, "Voorstel", WriteCapacityUnits ]
+      TableName:      # optional
+        Voorstel
+      Tags:
+      - Key: Name
+        Value: !Join
+          - '-'
+          - - Voorstel
+            - !Ref AWS::StackName
+
+  FoutmeldingDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:                # required, list of AttributeDefinition
+        -
+          AttributeName: "Isbn"
+          AttributeType: "N"
+        -
+          AttributeName: "Timestamp"
+          AttributeType: "S"
+      KeySchema:                # required, list of KeySchema
+        -
+          AttributeName: "Isbn"
+          KeyType: "HASH"
+        -
+          AttributeName: "Timestamp"
+          KeyType: "RANGE"
+      ProvisionedThroughput:      # required
+        ReadCapacityUnits: !FindInMap [ CapacityMap, "Foutmelding", ReadCapacityUnits ]
+        WriteCapacityUnits: !FindInMap [ CapacityMap, "Foutmelding", WriteCapacityUnits ]
+      StreamSpecification:     # optional
+        StreamViewType: NEW_IMAGE
+      TableName:      # optional
+        Foutmelding
+      Tags:
+      - Key: Name
+        Value: !Join
+          - '-'
+          - - Foutmelding
+            - !Ref AWS::StackName
+
+  ScalableTargetRekognitionResultaatTableWrite:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !FindInMap [ CapacityMap, "RekognitionResultaat", WriteAutoscalingMax ]
+      MinCapacity: !FindInMap [ CapacityMap, "RekognitionResultaat", WriteAutoscalingMin ]
+      ResourceId: !Join
+        - /
+        - - table
+          - !Ref RekognitionResultaatDynamoDBTable
+      RoleARN: !GetAtt ScalingRole.Arn
+      ScalableDimension: dynamodb:table:WriteCapacityUnits
+      ServiceNamespace: dynamodb
+
+  ScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - application-autoscaling.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "dynamodb:DescribeTable"
+                  - "dynamodb:UpdateTable"
+                  - "cloudwatch:PutMetricAlarm"
+                  - "cloudwatch:DescribeAlarms"
+                  - "cloudwatch:GetMetricStatistics"
+                  - "cloudwatch:SetAlarmState"
+                  - "cloudwatch:DeleteAlarms"
+                Resource: "*"
+
+  ScalingPolicyRekognitionResultaat:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: WriteAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTargetRekognitionResultaatTableWrite
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70.0
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBWriteCapacityUtilization
+
+Outputs:
+  RekognitionResultaatDynamoDBTableArn:
+    Value: !GetAtt RekognitionResultaatDynamoDBTable.StreamArn
+    Export:
+      Name: !Sub '${AWS::StackName}-RekognitionResultaatDynamoDBTableStreamArn'

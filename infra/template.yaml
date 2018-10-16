@@ -1,0 +1,510 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Infrastructure redactionele controle
+Parameters:
+  PublicSubnetCidrBlock:
+    Type: String
+    Default: '10.0.1.0/24'
+  PrivateSubnetCidrBlock:
+    Type: String
+    Default: '10.0.2.0/24'
+  Omgeving:
+    Type: String
+    Default: DEV
+    AllowedValues:
+      - DEV
+      - TEST
+      - PROD
+    Description: De omgeving waar de applicatie wordt uitgevoerd. Default waarde is DEV
+
+Conditions:
+  SNSMailDeveloper: !Equals [!Ref Omgeving, "DEV"]
+  SNSMailTA: !Or
+    - !Equals [!Ref Omgeving, "TEST"]
+    - !Equals [!Ref Omgeving, "PROD"]
+  SNSMailDS: !Or
+    - !Equals [!Ref Omgeving, "TEST"]
+    - !Equals [!Ref Omgeving, "PROD"]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: 'default'
+      Tags:
+      - Key: Name
+        Value: !Join
+          - ''
+          - - Vpc
+            - !Ref AWS::StackName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: IG RedactioneleControle
+
+  InternetGatewayAttachment:
+      Type: 'AWS::EC2::VPCGatewayAttachment'
+      Properties:
+        VpcId: !Ref Vpc
+        InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidrBlock
+      Tags:
+      - Key: Name
+        Value: RedactioneleControlePublicSubnet
+
+  PrivateSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnetCidrBlock
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Name
+        Value: RedactioneleControlePrivateSubnet
+
+  ElasticInternetIp:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: !Ref Vpc
+
+  NatGateway:
+    Type: 'AWS::EC2::NatGateway'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      AllocationId: !GetAtt ElasticInternetIp.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+      - Key: Name
+        Value: RedactioneleControleNatGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PublicRouteTable
+      GatewayId: !Ref InternetGateway
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+      RouteTableId: !Ref PrivateRouteTable
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Default private security group'
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: 6
+          ToPort: 443
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: 6
+          ToPort: 443
+
+  PublicNetworkAcl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      Tags:
+        - Key: Name
+          Value: PublicNetworkAcl
+      VpcId: !Ref Vpc
+
+  PrivateNetworkAcl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      Tags:
+        - Key: Name
+          Value: PrivateNetworkAcl
+      VpcId: !Ref Vpc
+
+  PublicSubnetNetworkAclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      SubnetId: !Ref PublicSubnet
+
+  PrivateSubnetNetworkAclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      NetworkAclId: !Ref PrivateNetworkAcl
+      SubnetId: !Ref PrivateSubnet
+
+  # ACL rules for private subnets
+  # PrivateNetworkAclEntryInboundNat:
+  #   Type: 'AWS::EC2::NetworkAclEntry'
+  #   Properties:
+  #     CidrBlock: 0.0.0.0/0
+  #     Egress: 'false'
+  #     Protocol: '6'
+  #     PortRange:
+  #       From: '443'
+  #       To: '443'
+  #     RuleAction: allow
+  #     RuleNumber: '110'
+  #     NetworkAclId: !Ref PrivateNetworkAcl
+
+  PrivateNetworkAclEntryInboundResponse:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      Protocol: '6'
+      PortRange:
+        From: '1024'
+        To: '65535'
+      RuleAction: allow
+      RuleNumber: '120'
+      NetworkAclId: !Ref PrivateNetworkAcl
+
+  PrivateNetworkAclEntryOutboundNat:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      Protocol: '6'
+      PortRange:
+        From: '443'
+        To: '443'
+      RuleAction: allow
+      RuleNumber: '110'
+      NetworkAclId: !Ref PrivateNetworkAcl
+
+  # PrivateNetworkAclEntryOutboundResponse:
+  #   Type: 'AWS::EC2::NetworkAclEntry'
+  #   Properties:
+  #     CidrBlock: 0.0.0.0/0
+  #     Egress: 'true'
+  #     Protocol: '6'
+  #     PortRange:
+  #       From: '32768'
+  #       To: '65535'
+  #     RuleAction: allow
+  #     RuleNumber: '120'
+  #     NetworkAclId: !Ref PrivateNetworkAcl
+
+  # ACL rules for public subnets
+  # PublicNetworkAclEntryInboundHttps:
+  #   Type: 'AWS::EC2::NetworkAclEntry'
+  #   Properties:
+  #     CidrBlock: 0.0.0.0/0
+  #     Egress: 'false'
+  #     Protocol: '6'
+  #     PortRange:
+  #       From: '1024'
+  #       To: '65535'
+  #     RuleAction: allow
+  #     RuleNumber: '110'
+  #     NetworkAclId: !Ref PublicNetworkAcl
+
+  PublicNetworkAclEntryInboundAll:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'false'
+      Protocol: -1
+      PortRange:
+        From: -1
+        To: -1
+      RuleAction: allow
+      RuleNumber: '120'
+      NetworkAclId: !Ref PublicNetworkAcl
+
+  # PublicNetworkAclEntryOutboundHttps:
+  #   Type: 'AWS::EC2::NetworkAclEntry'
+  #   Properties:
+  #     CidrBlock: 0.0.0.0/0
+  #     Egress: 'true'
+  #     Protocol: '6'
+  #     PortRange:
+  #       From: '443'
+  #       To: '443'
+  #     RuleAction: allow
+  #     RuleNumber: '110'
+  #     NetworkAclId: !Ref PublicNetworkAcl
+
+  PublicNetworkAclEntryOutboundAll:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      Protocol: -1
+      PortRange:
+        From: -1
+        To: -1
+      RuleAction: allow
+      RuleNumber: '120'
+      NetworkAclId: !Ref PublicNetworkAcl
+
+  ApiGatewayLambdaS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-lambda-sns-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - sns:Publish
+                Resource: "*"
+
+  ApiGatewayLambdaDynamoRWRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-dynamodb-rw-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Effect: "Allow"
+                Resource: !Join
+                  - ':'
+                  - - "arn:aws:dynamodb"
+                    - !Ref AWS::Region
+                    - !Ref AWS::AccountId
+                    - "table/*"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-sns-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - sns:Publish
+                Resource: "*"
+
+  ApiGatewayLambdaDynamoRORole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-dynamodb-ro-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - dynamodb:GetItem
+                Effect: "Allow"
+                Resource: !Join
+                  - ':'
+                  - - "arn:aws:dynamodb"
+                    - !Ref AWS::Region
+                    - !Ref AWS::AccountId
+                    - "table/*"
+              - Action:
+                  - dynamodb:PutItem
+                Effect: "Allow"
+                Resource: !Join
+                  - ':'
+                  - - "arn:aws:dynamodb"
+                    - !Ref AWS::Region
+                    - !Ref AWS::AccountId
+                    - "table/Foutmelding"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-sns-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - sns:Publish
+                Resource: "*"
+
+  VpcEndpointDynamoDb:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Resource: !Join
+              - ':'
+              - - "arn:aws:dynamodb"
+                - !Ref AWS::Region
+                - !Ref AWS::AccountId
+                - "table/*"
+            Action:
+              - dynamodb:DeleteItem
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:Scan
+      ServiceName: !Join
+        - '.'
+        - - com.amazonaws
+          - !Ref AWS::Region
+          - dynamodb
+      VpcId: !Ref Vpc
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Join
+        - ' '
+        - - RedacTopic
+          - !Ref Omgeving
+
+  Queue:
+    Type: AWS::SQS::Queue
+
+  SubscriptionEmailDeveloper:
+    Type: AWS::SNS::Subscription
+    Condition: SNSMailDeveloper
+    Properties:
+      Endpoint: leenj@cb.nl     # optional
+      Protocol: email     # optional
+      TopicArn: !Ref Topic     # optional
+
+  SubscriptionEmailTA:
+    Type: AWS::SNS::Subscription
+    Condition: SNSMailTA
+    Properties:
+      Endpoint: SOTechnischArchitecten@cb.nl     # optional
+      Protocol: email     # optional
+      TopicArn: !Ref Topic     # optional
+
+  SubscriptionEmailDataScience:
+    Type: AWS::SNS::Subscription
+    Condition: SNSMailDS
+    Properties:
+      Endpoint: pbd-datascience@cb.nl     # optional
+      Protocol: email     # optional
+      TopicArn: !Ref Topic     # optional
+
+  SubscriptionSQS:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !GetAtt Queue.Arn     # optional
+      Protocol: sqs     # optional
+      TopicArn: !Ref Topic     # optional
+
+  SqsQueuePolicy:
+    Type: 'AWS::SQS::QueuePolicy'
+    Properties:
+      Queues:
+        - !Ref Queue
+      PolicyDocument:
+        Version: 2012-10-17
+        Id: PolicyDocumentQueues
+        Statement:
+          - Sid: '1'
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - 'sqs:SendMessage'
+            Resource: !GetAtt Queue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref Topic
+
+Outputs:
+  PrivateSubnetIds:
+    Value: !Ref PrivateSubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetIds'
+  PrivateSecurityGroupId:
+    Value: !Ref PrivateSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSecurityGroupId'
+  ApiGatewayLambdaS3RoleArn:
+    Value: !GetAtt ApiGatewayLambdaS3Role.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayLambdaS3RoleArn'
+  ApiGatewayLambdaDynamoRWRoleArn:
+    Value: !GetAtt ApiGatewayLambdaDynamoRWRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayLambdaDynamoRWRoleArn'
+  ApiGatewayLambdaDynamoRORoleArn:
+    Value: !GetAtt ApiGatewayLambdaDynamoRORole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayLambdaDynamoRORoleArn'
+  SNSTopicArn:
+    Value: !Ref Topic
+    Export:
+      Name: !Sub '${AWS::StackName}-SNSTopicArn'
+  Omgeving:
+    Value: !Ref Omgeving
+    Export:
+      Name: !Sub '${AWS::StackName}-Omgeving'

@@ -1,0 +1,754 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description:
+  "Script voor het maken van de resources van het voorstel proces"
+Transform: "AWS::Serverless-2016-10-31"
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+  StageNamePrd:
+    Type: String
+    Default: prd
+  InfraStackName:
+    Type: String
+    Default: redac-infra
+  DmStackName:
+    Type: String
+    Default: redac-voorstel-dm
+  VersionAlias:
+    Type: String
+    Default: Active
+  BucketNameRC:
+    # deze parameter is gemaakt ter voorkoming van circular dependency validation errors:
+    # zie https://aws.amazon.com/premiumsupport/knowledge-center/unable-validate-destination-s3/
+    Type: String
+    Default: bucket-redactionele-controle
+
+Resources:
+
+  BucketRedactioneleControle:
+    Type: AWS::S3::Bucket
+    DependsOn: S3LambdaPolicy
+    Properties:
+      BucketName: !Ref BucketNameRC
+      NotificationConfiguration:
+        LambdaConfigurations:
+          -
+            Function: !GetAtt RekognizeTextLambda.Arn
+            Event: "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  -
+                    Name: prefix
+                    Value: titelpagina/
+          -
+            Function: !GetAtt RekognizeTextLambda.Arn
+            Event: "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  -
+                    Name: prefix
+                    Value: colofon/
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          -
+            ExpirationInDays: 3
+            Status: Enabled
+
+  S3LambdaPolicy:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"     # required
+      FunctionName: !Ref RekognizeTextLambda     # required
+      Principal: s3.amazonaws.com
+      SourceArn: !Join
+        - ''
+        - - "arn:aws:s3:::"
+          - !Ref BucketNameRC
+
+  UpdateColofonLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: voorstel.zip     # required
+      Handler: UpdateColofon.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaS3RoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+          S3BucketName: !Ref BucketNameRC
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+      Description: Verwerk een nieuwe colofon
+
+  UpdateTitelpaginaLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: voorstel.zip     # required
+      Handler: UpdateTitelpagina.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaS3RoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+          S3BucketName: !Ref BucketNameRC
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+      Description: Verwerk een nieuwe titelpagina
+
+  GetVoorstelLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: voorstel.zip     # required
+      Handler: GetVoorstel.handler     # required
+      Role:
+        Fn::ImportValue: !Sub "${InfraStackName}-ApiGatewayLambdaDynamoRORoleArn"
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 3
+      AutoPublishAlias: latest
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+      Description: Haal het voorstel voor de isbn op
+
+  ApiGateway:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Body:
+        swagger: "2.0"
+        info:
+          version: "1.0.0"
+          title: !Sub "${AWS::StackName}-api"
+          description: REST webservice voor de het maken van redactionele voorstellen
+        security:
+          - api_key: []
+        x-amazon-apigateway-request-validators:
+          all:
+            validateRequestBody: true
+            validateRequestParameters: true
+        x-amazon-apigateway-request-validator: all
+        paths:
+          /rest/api/v1/redac/voorstel/{isbn}:
+          # GET
+            get:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Haal het voorstel op
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: isbn
+                  required: true
+                  type: number
+                  description: ISBN van het boek
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt GetVoorstelLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      "Isbn": "$input.params('isbn')"
+                    }
+                credentials: !GetAtt RoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              parameters:
+                - in: path
+                  name: isbn
+                  required: true
+                  type: number
+                  description: ISBN van het boek
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+          /rest/api/v1/redac/colofon:
+          # POST
+            post:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Plaats de colofon van een isbn
+              consumes:
+                - application/json
+              parameters:
+                - in: body
+                  name: ColofonCreateModel
+                  required: true
+                  schema:
+                    $ref: '#/definitions/ColofonCreate'
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt UpdateColofonLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      #set ($root=$input.path('$'))
+                      "Isbn": "$root.Isbn",
+                      "Colofon": "$root.Colofon"
+                    }
+                credentials: !GetAtt RoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+          /rest/api/v1/redac/titelpagina:
+          # POST
+            post:
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              summary: Plaats de titelpagina van een isbn
+              consumes:
+                - application/json
+              parameters:
+                - in: body
+                  name: TitelpaginaCreateModel
+                  required: true
+                  schema:
+                    $ref: '#/definitions/TitelpaginaCreate'
+              x-amazon-apigateway-integration:
+                type: "aws"
+                httpMethod: "POST"
+                uri: !Join
+                  - ''
+                  - - "arn:aws:apigateway:"
+                    - !Ref AWS::Region
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt UpdateTitelpaginaLambda.Arn
+                    - "/invocations"
+                requestTemplates:
+                  application/json: |
+                    {
+                      #set ($root=$input.path('$'))
+                      "Isbn": "$root.Isbn",
+                      "Titelpagina": "$root.Titelpagina"
+                    }
+                credentials: !GetAtt RoleApiGatewayToLambda.Arn
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 202
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+              security:
+                - api_key: []
+            options:
+              summary: CORS support
+              description: |
+                Enable CORS by returning correct headers
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              tags:
+                - CORS
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 202
+                    }
+                responses:
+                  "default":
+                    statusCode: "202"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers : "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods : "'*'"
+                      method.response.header.Access-Control-Allow-Origin : "'*'"
+                    responseTemplates:
+                      application/json: |
+                        {}
+              responses:
+                "202":
+                  description: Default response for CORS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+        securityDefinitions:
+          api_key:
+            type: "apiKey"
+            name: "x-api-key"
+            in: "header"
+        definitions:
+          Isbn:
+            type: "integer"
+            description: de isbn van het boek
+          Colofon:
+            type: "string"
+            description: de gescande colofontekst van het boek (in Base64)
+          Titelpagina:
+            type: "string"
+            description: de gescande titelpagina van het boek (in Base64)
+          ColofonCreate:
+            type: "object"
+            properties:
+              Isbn:
+                $ref: "#/definitions/Isbn"
+              Colofon:
+                $ref: "#/definitions/Colofon"
+            required:
+              - Isbn
+              - Colofon
+          TitelpaginaCreate:
+            type: "object"
+            properties:
+              Isbn:
+                $ref: "#/definitions/Isbn"
+              Titelpagina:
+                $ref: "#/definitions/Titelpagina"
+            required:
+              - Isbn
+              - Titelpagina
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiGatewayDeployment
+      RestApiId: !Ref ApiGateway
+      StageName: !Ref StageName
+
+  RoleApiGatewayToLambda:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "apigateway.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-api-lambda-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: "lambda:*"
+                Effect: "Allow"
+                Resource:
+                  - !Join
+                    - ''
+                    - - !GetAtt UpdateColofonLambda.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt UpdateTitelpaginaLambda.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt GetVoorstelLambda.Arn
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiGateway
+    Properties:
+      RestApiId: !Ref ApiGateway
+
+  ApiKey:
+    Type: "AWS::ApiGateway::ApiKey"
+    DependsOn:
+      - ApiGatewayDeployment
+      - ApiGatewayStage
+    Properties:
+      Description: "API key voor het maken van een voorstel"
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref ApiGateway
+          StageName: !Ref StageName
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - "ApiGateway"
+      - "ApiKey"
+    Properties:
+      ApiStages:
+      - ApiId: !Ref ApiGateway
+        Stage: !Ref StageName
+      Description: Redactionele controle beheer van type betrokkene API standaard Usage plan
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    DependsOn:
+      - "ApiGateway"
+      - "ApiKey"
+      - "UsagePlan"
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+  RekognizeTextLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: voorstel.zip     # required
+      Handler: RekognizeText.handler     # required
+      Role: !GetAtt RoleLambdaToRekognition.Arn
+      Runtime: nodejs8.10     # required
+      MemorySize: 128
+      Timeout: 8
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+          S3BucketName: !Ref BucketNameRC
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+      Description: Haal de teksten uit de plaatjes
+
+  RoleLambdaToRekognition:
+    Type: "AWS::IAM::Role"
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        # - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-lambda-rekognition-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: "rekognition:DetectText"
+                Effect: "Allow"
+                Resource: "*"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-cloudwatch-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-dynamodb-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  # - dynamodb:DescribeStream
+                  # - dynamodb:GetRecords
+                  # - dynamodb:GetShardIterator
+                  # - dynamodb:ListStreams
+                  # - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: "*"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-sns-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - sns:Publish
+                Resource: "*"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-s3-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                Resource: "*"
+
+  MaakVoorstelLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: redactionele_controle.zip     # required
+      Handler: MaakVoorstel.lambda_handler     # required
+      Role: !GetAtt RoleLambdaMaakVoorstel.Arn
+      Runtime: python3.6      # required
+      MemorySize: 1536
+      Timeout: 120
+      AutoPublishAlias: latest
+      Environment:
+        Variables:
+          SNS_ARN:
+            Fn::ImportValue:
+              !Sub "${InfraStackName}-SNSTopicArn"
+      VpcConfig:
+        SecurityGroupIds:                 # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSecurityGroupId"
+        SubnetIds:                # required, list of String
+          - Fn::ImportValue:
+              !Sub "${InfraStackName}-PrivateSubnetIds"
+      Description: Maak een voorstel aan
+
+  RoleLambdaMaakVoorstel:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-lambda-cloudwatch-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-dynamodb-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Scan
+                Resource: !Join
+                  - ':'
+                  - - "arn:aws:dynamodb"
+                    - !Ref AWS::Region
+                    - !Ref AWS::AccountId
+                    - "table/*"
+        - PolicyName: !Sub "${AWS::StackName}-lambda-sns-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+                Effect: "Allow"
+                Action:
+                  - sns:Publish
+                Resource: "*"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
+  EventSourceMappingRekognitionResultaat:
+    Type: "AWS::Lambda::EventSourceMapping"
+    Properties:
+      EventSourceArn:
+        Fn::ImportValue: !Sub "${DmStackName}-RekognitionResultaatDynamoDBTableStreamArn"
+      FunctionName: !GetAtt MaakVoorstelLambda.Arn
+      StartingPosition: LATEST

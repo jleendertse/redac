@@ -1,0 +1,204 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: "AWS::Serverless-2016-10-31"
+Parameters:
+  InfraStackName:
+    Type: String
+    Default: redac-infra
+  Table:
+    Type: String
+    Default: Vertaler
+    AllowedValues:
+      - Vertaler
+      - Fotograaf
+      - Illustrator
+      - Redacteur
+      - Voorlezer
+      - Auteur
+      - EditieType
+      - Feature
+      - Voorvoegsel
+    Description: Een naam van de tabel van de stamdata
+
+# instellingen van de capacity per tabel
+# ReadCapacityUnits: Provisioned capacity read units
+# WriteCapacityUnits: Provisioned capacity write units
+# ReadAutoscaling: als 1, zet autoscaling aan voor read
+# ReadAutoscalingMin: Minimum read provisioned capacity bij autoscaling
+# ReadAutoscalingMax: Maximum read provisioned capacity bij autoscaling
+# WriteAutoscaling: als 1, zet autoscaling aan voor write
+# WriteAutoscalingMin: Minimum write provisioned capacity bij autoscaling
+# WriteAutoscalingMax: Maximum write provisioned capacity bij autoscaling
+
+Mappings:
+  CapacityMap:
+    Vertaler:
+      ReadCapacityUnits:  5
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 5
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Fotograaf:
+      ReadCapacityUnits:  2
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 2
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Illustrator:
+      ReadCapacityUnits:  7
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 5
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Redacteur:
+      ReadCapacityUnits:  15
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 5
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Voorlezer:
+      ReadCapacityUnits:  2
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 2
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Auteur:
+      ReadCapacityUnits:  60
+      WriteCapacityUnits: 1
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 5
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    EditieType:
+      ReadCapacityUnits:  2
+      WriteCapacityUnits: 2
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 2
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Feature:
+      ReadCapacityUnits:  5
+      WriteCapacityUnits: 2
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 5
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+    Voorvoegsel:
+      ReadCapacityUnits: 5
+      WriteCapacityUnits: 2
+      ReadAutoscaling: 1
+      ReadAutoscalingMin: 5
+      ReadAutoscalingMax: 60
+      WriteAutoscaling: 0
+      WriteAutoscalingMin: 0
+      WriteAutoscalingMax: 0
+
+Conditions:
+  CreateAutoScalingRead: !Equals [!FindInMap [ CapacityMap, !Ref Table, ReadAutoscaling ], 1]
+  CreateAutoScalingWrite: !Equals [!FindInMap [ CapacityMap, !Ref Table, WriteAutoscaling ], 1]
+
+Resources:
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:                # required, list of AttributeDefinition
+        -
+          AttributeName: "Id"
+          AttributeType: "N"
+      KeySchema:                # required, list of KeySchema
+        -
+          AttributeName: "Id"
+          KeyType: "HASH"
+      ProvisionedThroughput:      # required
+        ReadCapacityUnits: !FindInMap [ CapacityMap, !Ref Table, ReadCapacityUnits ]
+        WriteCapacityUnits: !FindInMap [ CapacityMap, !Ref Table, WriteCapacityUnits ]
+      TableName:      # optional
+        !Ref Table
+      Tags:
+      - Key: Name
+        Value: !Join
+          - '-'
+          - - !Ref Table
+            - !Ref AWS::StackName
+
+  ReadCapacityScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: CreateAutoScalingRead
+    Properties:
+      MaxCapacity: !FindInMap [ CapacityMap, !Ref Table, ReadAutoscalingMax ]
+      MinCapacity: !FindInMap [ CapacityMap, !Ref Table, ReadAutoscalingMin ]
+      ResourceId: !Join
+        - /
+        - - table
+          - !Ref DynamoDBTable
+      RoleARN: !GetAtt ScalingRole.Arn
+      ScalableDimension: dynamodb:table:ReadCapacityUnits
+      ServiceNamespace: dynamodb
+
+  ScalingRole:
+    Type: AWS::IAM::Role
+    Condition: CreateAutoScalingRead
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - application-autoscaling.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "dynamodb:DescribeTable"
+                  - "dynamodb:UpdateTable"
+                  - "cloudwatch:PutMetricAlarm"
+                  - "cloudwatch:DescribeAlarms"
+                  - "cloudwatch:GetMetricStatistics"
+                  - "cloudwatch:SetAlarmState"
+                  - "cloudwatch:DeleteAlarms"
+                Resource: "*"
+
+  ReadScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: CreateAutoScalingRead
+    Properties:
+      PolicyName: ReadAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ReadCapacityScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70.0
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBReadCapacityUtilization
