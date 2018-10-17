@@ -11,7 +11,13 @@ phases:
     commands:
       - cd infra
       - ls
-      - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix $STACK_NAME --region $REGION
+      - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix "redac-infra" --region $REGION
+      - ls
+      - cd ../voorstel
+      - ls
+      - aws cloudformation package --template-file template_dm.yaml --output-template-file serverless-template_dm.yaml --s3-bucket $BUCKET --s3-prefix "redac-stamdata --region $REGION
+      - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix "redac-stamdata --region $REGION
+      - ls
       
 artifacts:
   files:
