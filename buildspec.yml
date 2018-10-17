@@ -14,7 +14,7 @@ phases:
       - ls
   post_build:
     commands:
-      - cd infra
+      - cd ../infra
       - ls
       - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix "redac-infra" --region $REGION
       - ls
