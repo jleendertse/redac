@@ -20,6 +20,7 @@ phases:
       - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix "redac-infra" --region $REGION
       - cp serverless-template.yaml ..
       - ls
+      - ls ..
 
 artifacts:
   type: zip
