@@ -7,7 +7,12 @@ env:
     REGION: "eu-west-1"
 
 phases:
-  install:
+  build:
+    commands:
+      - cd voorstel
+      - zip voorstel.zip *.js
+      - ls
+  post_build:
     commands:
       - cd infra
       - ls
@@ -23,4 +28,7 @@ artifacts:
   files:
     - infra/template.yaml
     - infra/serverless-template.yaml
-    
+    - voorstel/template_dm.yaml
+    - voorstel/serverless-template_dm.yaml
+    - voorstel/template.yaml
+    - voorstel/serverless-template.yaml
