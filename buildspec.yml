@@ -18,18 +18,11 @@ phases:
       - cd ../infra
       - ls
       - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix "redac-infra" --region $REGION
+      - cp serverless-template.yaml ..
       - ls
-      - cd ../voorstel
-      - ls
-      - aws cloudformation package --template-file template_dm.yaml --output-template-file serverless-template_dm.yaml --s3-bucket $BUCKET --s3-prefix "redac-voorstel-dm" --region $REGION
-      - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix "redac-voorstel" --region $REGION
-      - ls
-      
+
 artifacts:
+  type: zip
   files:
     - infra/template.yaml
-    - infra/serverless-template.yaml
-    - voorstel/template_dm.yaml
-    - voorstel/serverless-template_dm.yaml
-    - voorstel/template.yaml
-    - voorstel/serverless-template.yaml
+    - serverless-template.yaml
