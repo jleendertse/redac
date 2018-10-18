@@ -432,7 +432,7 @@ Resources:
     Type: AWS::SNS::Subscription
     Condition: SNSMailDeveloper
     Properties:
-      Endpoint: leenj@cb.nl     # optional
+      Endpoint: j.leendertse@cb.nl     # optional
       Protocol: email     # optional
       TopicArn: !Ref Topic     # optional
 
