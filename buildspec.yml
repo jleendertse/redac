@@ -8,6 +8,7 @@ env:
 
 phases:
   pre_build:
+    commands:
       - cd voorstel
       - zip voorstel.zip *.js
       - cp voorstel.zip redactionele_controle.zip
