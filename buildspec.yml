@@ -7,12 +7,16 @@ env:
     REGION: "eu-west-1"
 
 phases:
-  build:
-    commands:
+  pre_build:
       - cd voorstel
       - zip voorstel.zip *.js
       - cp voorstel.zip redactionele_controle.zip
       - ls
+      - cd ../stamdata
+      - zip stamdata.zip *.js
+      - ls
+  build:
+    commands:
       - cd ../infra
       - ls
       - aws cloudformation package --template-file template.yaml --output-template-file serverless-template.yaml --s3-bucket $BUCKET --s3-prefix "redac-infra" --region $REGION
